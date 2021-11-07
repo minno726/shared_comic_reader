@@ -1,8 +1,9 @@
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
+use hyper::body::Buf;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::upgrade::Upgraded;
-use hyper::{header, upgrade, StatusCode};
+use hyper::{body, header, upgrade, Client, StatusCode, Uri};
 use hyper::{server::conn::AddrStream, Body, Request, Response, Server};
 use lazy_static::lazy_static;
 use route_recognizer::Router;
@@ -10,8 +11,10 @@ use serde_json::json;
 use std::cmp::Ordering;
 use std::convert::Infallible;
 use std::fs;
+use std::io::Read;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use tokio::sync::Mutex;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::{handshake, Error, Message};
@@ -297,6 +300,26 @@ async fn main() {
         .ok()
         .and_then(|s: String| s.parse::<u16>().ok())
         .unwrap_or(30000);
+
+    let response = Client::new()
+        .get(Uri::from_static("http://ipinfo.io/ip"))
+        .await
+        .expect("Request for external IP failed.");
+    if response.status() == StatusCode::OK {
+        let mut buf = String::new();
+        let data = body::aggregate(response)
+            .await
+            .expect("Request for external IP couldn't be parsed.")
+            .reader()
+            .read_to_string(&mut buf);
+        if let Ok(uri) = Uri::from_str(&buf) {
+            println!("External link: http://{}:{}/index.html", uri, port);
+        } else {
+            println!("Unable to determine external IP.");
+        }
+    } else {
+        println!("Unable to determine external IP.");
+    }
 
     //hyper server boilerplate code from https://hyper.rs/guides/server/hello-world/
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
