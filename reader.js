@@ -1,16 +1,22 @@
-var pages = [];
-var comic = RegExp("/(\\w+)/reader.html").exec(window.location.pathname)[1];
+let pages = [];
+let curPage = "";
+let mirror = null;
+let failed_mirror_hits = 0;
+let comic = RegExp("/(\\w+)/reader.html").exec(window.location.pathname)[1];
 
 let ws = null;
-let curPage = "";
 
 function switchPage(page) {
+    let root = `/img/${comic}`;
+    if (mirror && failed_mirror_hits < 10) {
+        root = `${mirror}/${comic}`;
+    }
     window.location.hash = page;
-    document.getElementById("comic").setAttribute("src", `/${comic}/img/${encodeURIComponent(page)}`);
+    document.getElementById("comic").setAttribute("src", `${root}/${encodeURIComponent(page)}`);
     curPage = page;
     current = pages.indexOf(page);
     if (current < pages.length - 1) {
-        document.getElementById("comic-next").setAttribute("src", `/${comic}/img/${encodeURIComponent(pages[current + 1])}`);
+        document.getElementById("comic-next").setAttribute("src", `${root}/${encodeURIComponent(pages[current + 1])}`);
     }
     window.scrollTo(0, 0);
     let select = document.getElementById("page-select");
@@ -18,7 +24,6 @@ function switchPage(page) {
 }
 
 function changePage(page) {
-    console.log(page);
     ws.send(JSON.stringify({ "comic": comic, "page": page }));
     switchPage(page);
 }
@@ -48,6 +53,16 @@ function init() {
         document.getElementById("prev").onclick = _ => { prevPage(); };
         document.getElementById("comic-container").onclick = _ => { nextPage(); };
         document.getElementById("next").onclick = _ => { nextPage(); };
+
+        let skip_mirror = (error) => {
+            let src = error.originalTarget.getAttribute("src");
+            if (!src.startsWith("/")) {
+                failed_mirror_hits += 1;
+                error.originalTarget.setAttribute("src", src.replace(mirror, "/img"));
+            }
+        }
+        document.getElementById("comic").onerror = skip_mirror;
+        document.getElementById("comic-next").onerror = skip_mirror;
 
         document.addEventListener("keydown", event => {
             if (event.code == "ArrowLeft") {
@@ -80,4 +95,7 @@ function init() {
         }
     };
 }
-fetch(`/${comic}/img_list`).then(response => response.json()).then(body => pages = body).then(init);
+fetch(`/${comic}/img_list`)
+    .then(response => response.json())
+    .then(body => { pages = body.pages; mirror = body.mirror })
+    .then(init);

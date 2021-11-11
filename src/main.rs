@@ -73,10 +73,34 @@ fn smart_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
+struct Config {
+    port: u16,
+    img_folder: PathBuf,
+    mirror: Option<String>,
+}
+
+fn init_config() -> Config {
+    let mut args = pico_args::Arguments::from_env();
+    let mut img_folder = PathBuf::new();
+    img_folder.push(&args.value_from_str("--folder").unwrap_or(".".to_string()));
+    let port = args
+        .value_from_str("--port")
+        .ok()
+        .and_then(|s: String| s.parse::<u16>().ok())
+        .unwrap_or(30000);
+    let mirror: Option<String> = args.value_from_str("--mirror").ok();
+
+    Config {
+        port,
+        img_folder,
+        mirror,
+    }
+}
+
 lazy_static! {
     static ref CONNECTIONS: Mutex<Vec<(SocketAddr, SplitSink<WebSocketStream<Upgraded>, Message>)>> =
         Mutex::new(Vec::new());
-    static ref IMG_FOLDER: Mutex<PathBuf> = Mutex::new(PathBuf::new());
+    static ref CONFIG: Config = init_config();
 }
 
 fn err(code: u16) -> Response<Body> {
@@ -217,7 +241,7 @@ async fn handle_static_request(url: &str) -> Result<Response<Body>, Response<Bod
             router.add("/:comic/reader.js", "reader.js");
             router.add("/comic_list", "comic_list");
             router.add("/:comic/img_list", "img_list");
-            router.add("/:comic/img/:img", "img");
+            router.add("/img/:comic/:img", "img");
             router
         };
     };
@@ -241,7 +265,7 @@ async fn handle_static_request(url: &str) -> Result<Response<Body>, Response<Bod
                 .unwrap())
         }
         "comic_list" => {
-            let mut folders = fs::read_dir(&*IMG_FOLDER.lock().await)
+            let mut folders = fs::read_dir(&CONFIG.img_folder)
                 .map_err(|_| err(500))?
                 .filter_map(|el| {
                     let info = el.ok()?;
@@ -260,22 +284,28 @@ async fn handle_static_request(url: &str) -> Result<Response<Body>, Response<Bod
         }
         "img_list" => {
             let comic = route.params().find("comic").ok_or(err(500))?;
-            let mut path = IMG_FOLDER.lock().await.clone();
+            let mut path = CONFIG.img_folder.clone();
             path.push(comic);
             let mut files = fs::read_dir(path)
                 .map_err(|_| err(500))?
                 .filter_map(|el| Some(el.ok()?.file_name().to_string_lossy().into_owned()))
                 .collect::<Vec<_>>();
             files.sort_by(|a, b| smart_cmp(a, b));
+            let mut response = json!({
+                "pages": files,
+            });
+            if let Some(mirror_url) = CONFIG.mirror.as_ref() {
+                response["mirror"] = serde_json::Value::from(&**mirror_url);
+            };
             Ok(Response::builder()
                 .header("Content-Type", "text/json")
-                .body(Body::from(json!(files).to_string()))
+                .body(Body::from(response.to_string()))
                 .unwrap())
         }
         "img" => {
             let comic = route.params().find("comic").ok_or(err(500))?;
             let img = decode(route.params().find("img").ok_or(err(500))?).map_err(|_| err(500))?;
-            let mut path = IMG_FOLDER.lock().await.clone();
+            let mut path = CONFIG.img_folder.clone();
             path.push(comic);
             path.push(&*img);
             let data = fs::read(path).map_err(|_| err(500))?;
@@ -290,17 +320,6 @@ async fn handle_static_request(url: &str) -> Result<Response<Body>, Response<Bod
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let mut args = pico_args::Arguments::from_env();
-    IMG_FOLDER
-        .lock()
-        .await
-        .push(&args.value_from_str("--folder").unwrap_or(".".to_string()));
-    let port = args
-        .value_from_str("--port")
-        .ok()
-        .and_then(|s: String| s.parse::<u16>().ok())
-        .unwrap_or(30000);
-
     let response = Client::new()
         .get(Uri::from_static("http://ipinfo.io/ip"))
         .await
@@ -314,7 +333,7 @@ async fn main() {
             .read_to_string(&mut buf)
             .unwrap();
         if let Ok(uri) = Uri::from_str(&buf) {
-            println!("External link: http://{}:{}/index.html", uri, port);
+            println!("External link: http://{}:{}/index.html", uri, CONFIG.port);
         } else {
             println!("Unable to determine external IP.");
         }
@@ -323,7 +342,7 @@ async fn main() {
     }
 
     //hyper server boilerplate code from https://hyper.rs/guides/server/hello-world/
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], CONFIG.port));
 
     println!("Listening on {} for http or websocket connections.", addr);
 
