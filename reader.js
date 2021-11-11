@@ -46,7 +46,7 @@ function init() {
 
     ws.onopen = (event) => {
         if (window.location.hash !== "") {
-            changePage(window.location.hash.substr(1, window.location.hash.length - 1));
+            changePage(decodeURIComponent(window.location.hash.substr(1, window.location.hash.length - 1)));
         } else {
             changePage(pages[0]);
         }
