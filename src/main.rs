@@ -9,7 +9,7 @@ use lazy_static::lazy_static;
 use route_recognizer::Router;
 use serde_json::json;
 use std::cmp::Ordering;
-use std::convert::Infallible;
+use std::convert::{Infallible, TryInto};
 use std::fs;
 use std::io::Read;
 use std::net::SocketAddr;
@@ -73,6 +73,7 @@ fn smart_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
+#[derive(Debug)]
 struct Config {
     port: u16,
     img_folder: PathBuf,
@@ -80,21 +81,40 @@ struct Config {
 }
 
 fn init_config() -> Config {
+    let config_file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string("config.json").unwrap_or("{}".to_string()))
+            .unwrap();
+    let mut config = Config {
+        port: 30000,
+        img_folder: PathBuf::from_str(".").unwrap(),
+        mirror: None,
+    };
     let mut args = pico_args::Arguments::from_env();
-    let mut img_folder = PathBuf::new();
-    img_folder.push(&args.value_from_str("--folder").unwrap_or(".".to_string()));
-    let port = args
-        .value_from_str("--port")
-        .ok()
-        .and_then(|s: String| s.parse::<u16>().ok())
-        .unwrap_or(30000);
-    let mirror: Option<String> = args.value_from_str("--mirror").ok();
 
-    Config {
-        port,
-        img_folder,
-        mirror,
+    if let Ok(folder) = args.value_from_str("--folder") {
+        config.img_folder = folder;
+    } else if let Some(serde_json::Value::String(folder)) = config_file.get("folder") {
+        config.img_folder = PathBuf::from_str(&folder).unwrap();
     }
+
+    if let Ok(port) = args.value_from_str("--port") {
+        config.port = port;
+    } else if let Some(serde_json::Value::Number(port)) = config_file.get("port") {
+        // * gazes longlingly at https://github.com/rust-lang/rust/issues/31436 *
+        if let Some(port) = port.as_u64() {
+            if let Ok(port) = port.try_into() {
+                config.port = port;
+            }
+        }
+    }
+
+    if let Ok(mirror) = args.value_from_str("--mirror") {
+        config.mirror = Some(mirror);
+    } else if let Some(serde_json::Value::String(mirror)) = config_file.get("mirror") {
+        config.mirror = Some(mirror.clone());
+    }
+
+    config
 }
 
 lazy_static! {
@@ -340,6 +360,8 @@ async fn main() {
     } else {
         println!("Unable to determine external IP.");
     }
+
+    println!("{:?}", *CONFIG);
 
     //hyper server boilerplate code from https://hyper.rs/guides/server/hello-world/
     let addr = SocketAddr::from(([0, 0, 0, 0], CONFIG.port));
