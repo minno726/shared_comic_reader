@@ -307,11 +307,12 @@ async fn main() {
         .expect("Request for external IP failed.");
     if response.status() == StatusCode::OK {
         let mut buf = String::new();
-        let data = body::aggregate(response)
+        body::aggregate(response)
             .await
             .expect("Request for external IP couldn't be parsed.")
             .reader()
-            .read_to_string(&mut buf);
+            .read_to_string(&mut buf)
+            .unwrap();
         if let Ok(uri) = Uri::from_str(&buf) {
             println!("External link: http://{}:{}/index.html", uri, port);
         } else {
