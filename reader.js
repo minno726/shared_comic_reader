@@ -55,10 +55,10 @@ function init() {
         document.getElementById("next").onclick = _ => { nextPage(); };
 
         let skip_mirror = (error) => {
-            let src = error.originalTarget.getAttribute("src");
+            let src = error.target.getAttribute("src");
             if (!src.startsWith("/")) {
                 failed_mirror_hits += 1;
-                error.originalTarget.setAttribute("src", src.replace(mirror, "/img"));
+                error.target.setAttribute("src", src.replace(mirror, "/img"));
             }
         }
         document.getElementById("comic").onerror = skip_mirror;
