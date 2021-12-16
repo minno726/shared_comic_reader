@@ -7,8 +7,9 @@ use hyper::{body, header, upgrade, Client, StatusCode, Uri};
 use hyper::{server::conn::AddrStream, Body, Request, Response, Server};
 use lazy_static::lazy_static;
 use route_recognizer::Router;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::convert::{Infallible, TryInto};
 use std::fs;
 use std::io::Read;
@@ -117,9 +118,14 @@ fn init_config() -> Config {
     config
 }
 
+#[derive(Default)]
+struct Status {
+    connections: Vec<(SocketAddr, SplitSink<WebSocketStream<Upgraded>, Message>)>,
+    current_pages: HashMap<String, String>,
+}
+
 lazy_static! {
-    static ref CONNECTIONS: Mutex<Vec<(SocketAddr, SplitSink<WebSocketStream<Upgraded>, Message>)>> =
-        Mutex::new(Vec::new());
+    static ref STATUS: Mutex<Status> = Mutex::new(Default::default());
     static ref CONFIG: Config = init_config();
 }
 
@@ -182,7 +188,11 @@ async fn handle_ws_request(
                         //we can split the stream into a sink and a stream
                         let (ws_write, mut ws_read) = ws_stream.split();
 
-                        CONNECTIONS.lock().await.push((remote_addr, ws_write));
+                        STATUS
+                            .lock()
+                            .await
+                            .connections
+                            .push((remote_addr, ws_write));
                         println!("Connected to {:?}", remote_addr);
 
                         loop {
@@ -191,25 +201,51 @@ async fn handle_ws_request(
                                 | Some(Err(Error::ConnectionClosed))
                                 | Some(Err(Error::Io(_)))
                                 | None => break,
-                                Some(Ok(msg @ Message::Text(_))) => {
-                                    let mut connections = CONNECTIONS.lock().await;
-                                    let mut i = connections.len() as isize - 1;
-                                    while i >= 0 {
-                                        let (addr, conn) = &mut connections[i as usize];
-                                        if *addr != remote_addr {
-                                            match conn.send(msg.clone()).await {
-                                                Ok(()) => {}
-                                                Err(Error::ConnectionClosed | Error::Io(_)) => {
-                                                    println!("Disconnected from {:?}", addr);
-                                                    let _ = connections.remove(i as usize);
+                                Some(Ok(Message::Text(msg))) => {
+                                    let mut status = STATUS.lock().await;
+                                    let mut i = status.connections.len() as isize - 1;
+                                    let msg_json: Value = serde_json::from_str(&msg).unwrap();
+                                    let comic = msg_json.get("comic").unwrap().as_str().unwrap();
+                                    if let Some(pg) = msg_json.get("page") {
+                                        *status
+                                            .current_pages
+                                            .entry(comic.to_string())
+                                            .or_default() = pg.as_str().unwrap().to_string();
+                                        while i >= 0 {
+                                            let (addr, conn) = &mut status.connections[i as usize];
+                                            if *addr != remote_addr {
+                                                match conn.send(Message::Text(msg.clone())).await {
+                                                    Ok(()) => {}
+                                                    Err(Error::ConnectionClosed | Error::Io(_)) => {
+                                                        println!("Disconnected from {:?}", addr);
+                                                        let _ =
+                                                            status.connections.remove(i as usize);
+                                                    }
+                                                    Err(e) => println!(
+                                                        "Error sending message to {:?}: {:?}",
+                                                        addr, e
+                                                    ),
                                                 }
-                                                Err(e) => println!(
-                                                    "Error sending message to {:?}: {:?}",
-                                                    addr, e
-                                                ),
                                             }
+                                            i -= 1;
                                         }
-                                        i -= 1;
+                                    } else {
+                                        let response = if let Some(current_page) =
+                                            status.current_pages.get(comic)
+                                        {
+                                            json!({"comic": comic, "page": current_page})
+                                        } else {
+                                            json!({ "comic": comic })
+                                        };
+                                        let conn = &mut status
+                                            .connections
+                                            .iter_mut()
+                                            .find(|el| el.0 == remote_addr)
+                                            .unwrap()
+                                            .1;
+                                        conn.send(Message::Text(response.to_string()))
+                                            .await
+                                            .unwrap();
                                     }
                                 }
                                 Some(Ok(_)) => todo!(),

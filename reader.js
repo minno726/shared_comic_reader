@@ -48,7 +48,7 @@ function init() {
         if (window.location.hash !== "") {
             changePage(decodeURIComponent(window.location.hash.substr(1, window.location.hash.length - 1)));
         } else {
-            changePage(pages[0]);
+            ws.send(JSON.stringify({ "comic": comic }));
         }
         document.getElementById("prev").onclick = _ => { prevPage(); };
         document.getElementById("comic-container").onclick = _ => { nextPage(); };
@@ -91,7 +91,11 @@ function init() {
     ws.onmessage = event => {
         let data = JSON.parse(event.data);
         if (data.comic === comic) {
-            switchPage(data.page);
+            if (data.page) {
+                switchPage(data.page);
+            } else {
+                changePage(pages[0]);
+            }
         }
     };
 }
