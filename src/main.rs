@@ -15,14 +15,24 @@ lazy_static! {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     pretty_env_logger::init();
+    let log = warp::log("scr::requests");
 
-    let router = ws().or(warp::get().and(apis().or(static_files())));
+    let router = ws()
+        .or(warp::get().and(apis().or(static_files())))
+        .with(log);
 
     print_external_address().await;
 
-    warp::serve(router).run(([0, 0, 0, 0], CONFIG.port)).await;
+    log::info!(target: "scr", "Starting server.");
+    let (_addr, server) =
+        warp::serve(router).bind_with_graceful_shutdown(([0, 0, 0, 0], CONFIG.port), async {
+            tokio::signal::ctrl_c().await.unwrap();
+            log::info!(target: "scr", "Server received ctrl-c, shutting down.");
+            sharing_service::shutdown().await;
+            log::info!(target: "scr", "Server completed shutdown.");
+        });
 
-    println!("Done!");
+    tokio::task::spawn(server).await.unwrap();
 }
 
 async fn print_external_address() {
@@ -51,7 +61,7 @@ async fn print_external_address() {
 fn ws() -> BoxedFilter<(impl warp::Reply,)> {
     warp::path("msg")
         .and(warp::ws())
-        .map(|ws: warp::ws::Ws| ws.on_upgrade(sharing_service::on_upgrade))
+        .map(|ws: warp::ws::Ws| ws.on_upgrade(sharing_service::connect_client))
         .boxed()
 }
 

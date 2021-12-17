@@ -50,6 +50,9 @@ function prevPage() {
 function msgReceived(event) {
     last_msg_time = Date.now();
     let data = JSON.parse(event.data);
+    if (data.disconnect) {
+        alert("The server has shut down.");
+    }
     if (data.comic === comic) {
         if (data.page) {
             switchPage(data.page);

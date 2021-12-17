@@ -15,17 +15,31 @@ struct Client {
     socket: SplitSink<WebSocket, Message>,
 }
 
-#[derive(Default)]
 struct Status {
     connections: Vec<Client>,
     current_pages: HashMap<String, String>,
 }
 
-lazy_static! {
-    static ref STATUS: Mutex<Status> = Mutex::new(Default::default());
+impl Status {
+    fn init_from_environment() -> Self {
+        let mut retval = Status {
+            connections: vec![],
+            current_pages: HashMap::new(),
+        };
+        if let Ok(file) = std::fs::read_to_string("current_pages.json") {
+            if let Ok(pages) = serde_json::from_str(&file) {
+                retval.current_pages = pages;
+            }
+        }
+        retval
+    }
 }
 
-pub async fn on_upgrade(ws: warp::ws::WebSocket) {
+lazy_static! {
+    static ref STATUS: Mutex<Status> = Mutex::new(Status::init_from_environment());
+}
+
+pub async fn connect_client(ws: warp::ws::WebSocket) {
     let (tx, mut rx) = ws.split();
     let id = ID_CTR.fetch_add(1, Ordering::SeqCst);
     STATUS
@@ -34,7 +48,7 @@ pub async fn on_upgrade(ws: warp::ws::WebSocket) {
         .connections
         .push(Client { id, socket: tx });
     while let Some(msg) = rx.next().await {
-        println!("{:?}", msg);
+        log::debug!(target: "scr::sharing_service", "Received message: {:?} from user {}", msg, id);
         let msg = msg.unwrap();
         if msg.is_close() {
             break;
@@ -58,6 +72,28 @@ pub async fn on_upgrade(ws: warp::ws::WebSocket) {
     }
 }
 
+pub async fn shutdown() {
+    std::fs::write(
+        "current_pages.json",
+        serde_json::to_value(&STATUS.lock().await.current_pages)
+            .unwrap()
+            .to_string(),
+    )
+    .unwrap();
+
+    disconnect_clients().await;
+}
+
+async fn disconnect_clients() {
+    let clients = &mut STATUS.lock().await.connections;
+    let dc_msg = warp::ws::Message::text(json!({"disconnect": true}).to_string());
+    for client in clients {
+        log::debug!(target: "scr::sharing_service", "Sending message: {:?} to user {}", dc_msg, client.id);
+        let _ = client.socket.send(dc_msg.clone()).await;
+        let _ = client.socket.close().await;
+    }
+}
+
 async fn broadcast_page(sender_id: i64, comic: &str, page: &str) {
     let clients = &mut STATUS.lock().await.connections;
     let msg = warp::ws::Message::text(json!({"comic": comic, "page": page}).to_string());
@@ -66,13 +102,27 @@ async fn broadcast_page(sender_id: i64, comic: &str, page: &str) {
         if client.id == sender_id {
             continue;
         }
+        log::debug!(
+            target: "scr::sharing_service",
+            "Sending message: {:?} to user {}",
+            msg,
+            client.id
+        );
         match client.socket.send(msg.clone()).await {
             Err(_) => disconnected_clients.push(client.id),
             _ => {}
         }
     }
 
-    clients.retain(|client| !disconnected_clients.contains(&client.id));
+    if !disconnected_clients.is_empty() {
+        log::debug!(
+            target: "scr::sharing_service",
+            "Disconnected clients: {:?}",
+            disconnected_clients
+        );
+
+        clients.retain(|client| !disconnected_clients.contains(&client.id));
+    }
 }
 
 async fn reply_current_page(sender_id: i64, comic: &str, page: Option<String>) {
@@ -85,9 +135,12 @@ async fn reply_current_page(sender_id: i64, comic: &str, page: Option<String>) {
         .iter_mut()
         .find(|client| client.id == sender_id)
         .unwrap();
-    source_client
-        .socket
-        .send(warp::ws::Message::text(response.to_string()))
-        .await
-        .unwrap();
+    let response = warp::ws::Message::text(response.to_string());
+    log::debug!(
+        target: "scr::sharing_service",
+        "Sending message: {:?} to user {}",
+        response,
+        source_client.id
+    );
+    source_client.socket.send(response).await.unwrap();
 }
