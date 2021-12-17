@@ -14,7 +14,7 @@
             for (let comic of comic_list) {
                 let new_link = document.createElement("a");
                 new_link.textContent = comic;
-                new_link.href = `/${comic}/reader.html`;
+                new_link.href = `/read/${comic}/`;
 
                 let new_li = document.createElement("li");
                 new_li.appendChild(new_link);

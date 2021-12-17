@@ -2,7 +2,7 @@ let pages = [];
 let curPage = "";
 let mirror = null;
 let failed_mirror_hits = 0;
-let comic = RegExp("/(\\w+)/reader.html").exec(window.location.pathname)[1];
+let comic = RegExp("/read/(\\w+)").exec(window.location.pathname)[1];
 
 let ws = null;
 
@@ -99,7 +99,7 @@ function init() {
         }
     };
 }
-fetch(`/${comic}/img_list`)
+fetch(`/img_list/${comic}`)
     .then(response => response.json())
     .then(body => { pages = body.pages; mirror = body.mirror })
     .then(init);

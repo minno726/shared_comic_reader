@@ -14,10 +14,8 @@ repository = "https://github.com/minno726/shared_comic_reader/"
 futures = { version="0.3" }
 tokio = { version="1.0", features=["rt","macros"] }
 hyper={ version="0.14", features=["server","client","http1","http2","tcp"] }
-tungstenite={ version="0.12", default-features=false }
-tokio-tungstenite={ version="0.13" }
 lazy_static = "1.4.0"
 serde_json = "1.0.68"
-route-recognizer = "0.3.1"
-urlencoding = "2.1.0"
 pico-args = "0.4.2"
+warp = "0.3.2"
+pretty_env_logger = "0.4.0"
