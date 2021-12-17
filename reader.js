@@ -5,6 +5,7 @@ let failed_mirror_hits = 0;
 let comic = RegExp("/read/(\\w+)").exec(window.location.pathname)[1];
 
 let ws = null;
+let last_msg_time = Date.now();
 
 function switchPage(page) {
     let root = `/img/${comic}`;
@@ -24,8 +25,13 @@ function switchPage(page) {
 }
 
 function changePage(page) {
-    ws.send(JSON.stringify({ "comic": comic, "page": page }));
-    switchPage(page);
+    // To prevent two people from accidentally both scrolling and ending up
+    // jumping two pages, prevent one of them from changing the page right
+    // after the other one did.
+    if (Date.now() - last_msg_time > 500) {
+        ws.send(JSON.stringify({ "comic": comic, "page": page }));
+        switchPage(page);
+    }
 }
 
 function nextPage() {
@@ -38,6 +44,18 @@ function prevPage() {
     let current = pages.indexOf(curPage);
     if (current > 0) {
         changePage(pages[current - 1]);
+    }
+}
+
+function msgReceived(event) {
+    last_msg_time = Date.now();
+    let data = JSON.parse(event.data);
+    if (data.comic === comic) {
+        if (data.page) {
+            switchPage(data.page);
+        } else {
+            changePage(pages[0]);
+        }
     }
 }
 
@@ -88,16 +106,7 @@ function init() {
         }
     }
 
-    ws.onmessage = event => {
-        let data = JSON.parse(event.data);
-        if (data.comic === comic) {
-            if (data.page) {
-                switchPage(data.page);
-            } else {
-                changePage(pages[0]);
-            }
-        }
-    };
+    ws.onmessage = msgReceived;
 }
 fetch(`/img_list/${comic}`)
     .then(response => response.json())
