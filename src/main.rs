@@ -35,6 +35,7 @@ async fn main() {
     tokio::task::spawn(server).await.unwrap();
 }
 
+// Retrieves and prints the IP address that others can use to connect to the server.
 async fn print_external_address() {
     let response = Client::new()
         .get(Uri::from_static("http://ipinfo.io/ip"))
@@ -58,6 +59,7 @@ async fn print_external_address() {
     }
 }
 
+// Endpoint for websocket connections.
 fn ws() -> BoxedFilter<(impl warp::Reply,)> {
     warp::path("msg")
         .and(warp::ws())
@@ -65,6 +67,7 @@ fn ws() -> BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
+// Endpoints for static files.
 fn static_files() -> BoxedFilter<(impl warp::Reply,)> {
     let index = warp::path::end().and(warp::fs::file("index.html"));
     let reader_script = warp::path!("reader.js").and(warp::fs::file("reader.js"));
@@ -75,6 +78,7 @@ fn static_files() -> BoxedFilter<(impl warp::Reply,)> {
     reader_script.or(reader).or(index).boxed()
 }
 
+// Endpoints for the javascript client to use to populate various lists.
 fn apis() -> BoxedFilter<(impl warp::Reply,)> {
     let comic_list = warp::path!("comic_list").map(comic_list);
     let img_list = warp::path!("img_list" / String).map(img_list);
@@ -83,6 +87,7 @@ fn apis() -> BoxedFilter<(impl warp::Reply,)> {
     comic_list.or(img_list).or(img).boxed()
 }
 
+// Endpoint for getting a list of all of the available comics.
 fn comic_list() -> Json {
     let mut folders = fs::read_dir(&CONFIG.img_folder)
         .unwrap()
@@ -99,6 +104,7 @@ fn comic_list() -> Json {
     warp::reply::json(&folders)
 }
 
+// Endpoint for getting a list of all of the pages for a comic.
 fn img_list(comic: String) -> Json {
     let mut path = CONFIG.img_folder.clone();
     path.push(comic);

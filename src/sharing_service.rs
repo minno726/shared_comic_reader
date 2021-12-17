@@ -39,6 +39,8 @@ lazy_static! {
     static ref STATUS: Mutex<Status> = Mutex::new(Status::init_from_environment());
 }
 
+// Initializes the connection to a client and runs the main loop that listens
+// for websocket messages from them.
 pub async fn connect_client(ws: warp::ws::WebSocket) {
     let (tx, mut rx) = ws.split();
     let id = ID_CTR.fetch_add(1, Ordering::SeqCst);
@@ -72,6 +74,7 @@ pub async fn connect_client(ws: warp::ws::WebSocket) {
     }
 }
 
+// Run when the server exits, to notify clients and save data.
 pub async fn shutdown() {
     std::fs::write(
         "current_pages.json",
@@ -84,6 +87,7 @@ pub async fn shutdown() {
     disconnect_clients().await;
 }
 
+// Sends a message to notify every client of the server shutdown.
 async fn disconnect_clients() {
     let clients = &mut STATUS.lock().await.connections;
     let dc_msg = warp::ws::Message::text(json!({"disconnect": true}).to_string());
@@ -94,6 +98,8 @@ async fn disconnect_clients() {
     }
 }
 
+// When one client turns the page, broadcasts a message to every other client making
+// them turn the page too.
 async fn broadcast_page(sender_id: i64, comic: &str, page: &str) {
     let clients = &mut STATUS.lock().await.connections;
     let msg = warp::ws::Message::text(json!({"comic": comic, "page": page}).to_string());
@@ -125,6 +131,7 @@ async fn broadcast_page(sender_id: i64, comic: &str, page: &str) {
     }
 }
 
+// When a new client loads in, tell it what the current page is.
 async fn reply_current_page(sender_id: i64, comic: &str, page: Option<String>) {
     let mut response = json!({ "comic": comic });
     if let Some(page) = page {

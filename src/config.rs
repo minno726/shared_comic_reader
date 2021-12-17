@@ -20,6 +20,7 @@ impl Default for Config {
 }
 
 impl Config {
+    // Gets config values from command-line arguments, the config file, and the defaults, in that priority order.
     pub fn init_from_environment() -> Config {
         let config_file: Value =
             serde_json::from_str(&fs::read_to_string("config.json").unwrap_or("{}".to_string()))
